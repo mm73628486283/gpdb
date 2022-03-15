@@ -16,6 +16,8 @@
 
 #include "postgres.h"
 
+#include "catalog/namespace.h" // for GetTempNamespaceState()
+
 #include "access/xact.h"
 #include "libpq-fe.h"
 #include "libpq-int.h"
@@ -866,6 +868,7 @@ buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 	Oid			currentUserId = GetUserId();
 	int32		numsegments = getgpsegmentCount();
 	StringInfoData resgroupInfo;
+	Oid			tempNamespaceId, tempToastNamespaceId;
 
 	int			tmp,
 				len;
@@ -917,7 +920,10 @@ buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 		sddesc_len +
 		sizeof(numsegments) +
 		sizeof(resgroupInfo.len) +
-		resgroupInfo.len;
+		resgroupInfo.len +
+		sizeof(tempNamespaceId) +
+		sizeof(tempToastNamespaceId) +
+		0;
 
 	shared_query = palloc(total_query_len);
 
@@ -1012,11 +1018,20 @@ buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 		pos += resgroupInfo.len;
 	}
 
-	len = pos - shared_query - 1;
+	/* in-process variable for temporary namespace */
+	GetTempNamespaceState(&tempNamespaceId, &tempToastNamespaceId);
+	tempNamespaceId = pg_hton32(tempNamespaceId);
+	tempToastNamespaceId = pg_hton32(tempToastNamespaceId);
+
+	memcpy(pos, &tempNamespaceId, sizeof(tempNamespaceId));
+	pos += sizeof(tempNamespaceId);
+	memcpy(pos, &tempToastNamespaceId, sizeof(tempToastNamespaceId));
+	pos += sizeof(tempToastNamespaceId);
 
 	/*
 	 * fill in length placeholder
 	 */
+	len = pos - shared_query - 1;
 	tmp = htonl(len);
 	memcpy(shared_query + 1, &tmp, sizeof(len));
 
